@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -7,14 +8,23 @@ import pandas as pd
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
-from sklearn.model_selection import TunedThresholdClassifierCV
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    roc_auc_score,
+)
+from sklearn.model_selection import (
+    StratifiedKFold,
+    TunedThresholdClassifierCV,
+    cross_validate,
+    train_test_split,
+)
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.fetch_data import fetch_data
-from modeling.preprocess import build_preprocessor, clean_data, SEED, TARGET
+from modeling.preprocess import TARGET, SEED, build_preprocessor, clean_data
 
 
 def prepare_data():
@@ -124,6 +134,30 @@ def evaluate_and_train():
     joblib.dump(best_pipe, "modeling/artifacts/best_model.pkl")
     print("Model kaydedildi: modeling/artifacts/best_model.pkl")
 
+    print(f"\n--- Final Test Evaluation ({best_name}) ---")
+    y_pred = best_pipe.predict(X_test)
+    y_prob = best_pipe.predict_proba(X_test)[:, 1]
+
+    print(classification_report(y_test, y_pred))
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test, y_pred))
+
+    test_roc = roc_auc_score(y_test, y_prob)
+    print(f"Test ROC-AUC: {test_roc:.3f}")
+
+    results["test_evaluation"] = {
+        "model": best_name,
+        "roc_auc": round(test_roc, 3),
+        "report": classification_report(y_test, y_pred, output_dict=True)
+    }
+
+    def convert(obj):
+        if isinstance(obj, (np.integer, np.floating)):
+            return float(obj)
+        raise TypeError(f"Not serializable: {type(obj)}")
+
+    with open("modeling/artifacts/results.json", "w") as f:
+        json.dump(results, f, indent=2, default=convert)
     return results, best_name
 
 
