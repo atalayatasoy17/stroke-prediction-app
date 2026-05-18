@@ -4,6 +4,7 @@ import sys
 
 import joblib
 import numpy as np
+import optuna
 import pandas as pd
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -11,6 +12,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
     roc_auc_score,
 )
 from sklearn.model_selection import (
@@ -21,6 +25,8 @@ from sklearn.model_selection import (
 )
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
+
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.fetch_data import fetch_data
@@ -38,7 +44,45 @@ def prepare_data():
     return X_train, X_test, y_train, y_test
 
 
-def build_models():
+def optimize_xgb(X_train, y_train):
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+
+    def objective(trial):
+        params = {
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+            "max_depth": trial.suggest_int("max_depth", 3, 8),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        }
+
+        model = TunedThresholdClassifierCV(
+            estimator=XGBClassifier(
+                **params, random_state=SEED, eval_metric="logloss"
+            ),
+            scoring="f1",
+            cv=cv,
+            random_state=SEED,
+        )
+
+        pipe = Pipeline(steps=[
+            ("preprocessor", build_preprocessor()),
+            ("model", model),
+        ])
+
+        scores = cross_validate(pipe, X_train, y_train, cv=cv, scoring="f1")
+        return scores["test_score"].mean()
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=30, show_progress_bar=True)
+
+    print(f"\nEn iyi XGBoost parametreleri: {study.best_params}")
+    print(f"En iyi F1: {study.best_value:.3f}")
+
+    return study.best_params
+
+
+def build_models(xgb_params=None):
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 
     baseline = DummyClassifier(strategy="most_frequent")
@@ -59,13 +103,16 @@ def build_models():
         random_state=SEED,
     )
 
+    if xgb_params is None:
+        xgb_params = {
+            "n_estimators": 200,
+            "max_depth": 4,
+            "learning_rate": 0.1,
+        }
+
     xgb = TunedThresholdClassifierCV(
         estimator=XGBClassifier(
-            n_estimators=200,
-            max_depth=4,
-            learning_rate=0.1,
-            random_state=SEED,
-            eval_metric="logloss",
+            **xgb_params, random_state=SEED, eval_metric="logloss"
         ),
         scoring="f1",
         cv=cv,
@@ -82,7 +129,11 @@ def build_models():
 
 def evaluate_and_train():
     X_train, X_test, y_train, y_test = prepare_data()
-    models = build_models()
+
+    print("XGBoost hiperparametre optimizasyonu yapiliyor...")
+    xgb_params = optimize_xgb(X_train, y_train)
+    models = build_models(xgb_params=xgb_params)
+
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
     scorers = ["f1", "recall", "roc_auc"]
     results = {}
@@ -126,7 +177,7 @@ def evaluate_and_train():
 
     best_pipe = Pipeline(steps=[
         ("preprocessor", build_preprocessor()),
-        ("model", build_models()[best_name]),
+        ("model", build_models(xgb_params=xgb_params)[best_name]),
     ])
     best_pipe.fit(X_train, y_train)
 
@@ -145,6 +196,16 @@ def evaluate_and_train():
     test_roc = roc_auc_score(y_test, y_prob)
     print(f"Test ROC-AUC: {test_roc:.3f}")
 
+    print("\n--- Threshold Analysis ---")
+    print(f"{'Threshold':>10} {'Recall':>8} {'Precision':>10} {'F1':>8}")
+    print("-" * 42)
+    for thresh in np.linspace(0.05, 0.35, num=13):
+        y_pred_thresh = (y_prob >= thresh).astype(int)
+        r = recall_score(y_test, y_pred_thresh)
+        p = precision_score(y_test, y_pred_thresh, zero_division=0)
+        f = f1_score(y_test, y_pred_thresh)
+        print(f"{thresh:>10.3f} {r:>8.3f} {p:>10.3f} {f:>8.3f}")
+
     results["test_evaluation"] = {
         "model": best_name,
         "roc_auc": round(test_roc, 3),
@@ -158,6 +219,8 @@ def evaluate_and_train():
 
     with open("modeling/artifacts/results.json", "w") as f:
         json.dump(results, f, indent=2, default=convert)
+    print("Sonuclar kaydedildi: modeling/artifacts/results.json")
+
     return results, best_name
 
 
