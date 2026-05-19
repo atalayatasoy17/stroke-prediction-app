@@ -153,6 +153,9 @@ def evaluate_and_train():
             "f1": cv_res["test_f1"].mean(),
             "recall": cv_res["test_recall"].mean(),
             "roc_auc": cv_res["test_roc_auc"].mean(),
+            "fold_f1_scores": cv_res["test_f1"].tolist(),
+            "fold_recall_scores": cv_res["test_recall"].tolist(),
+            "std_f1": float(cv_res["test_f1"].std()),
         }
 
         print(f"\n{name}")
