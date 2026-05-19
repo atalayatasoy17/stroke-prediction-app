@@ -188,6 +188,14 @@ def evaluate_and_train():
     joblib.dump(best_pipe, "modeling/artifacts/best_model.pkl")
     print("Model kaydedildi: modeling/artifacts/best_model.pkl")
 
+    logreg_pipe = Pipeline(steps=[
+        ("preprocessor", build_preprocessor()),
+        ("model", build_models(xgb_params=xgb_params)["LogisticRegression"]),
+    ])
+    logreg_pipe.fit(X_train, y_train)
+    joblib.dump(logreg_pipe, "modeling/artifacts/logreg_model.pkl")
+    print("LogReg model kaydedildi: modeling/artifacts/logreg_model.pkl")
+
     print(f"\n--- Final Test Evaluation ({best_name}) ---")
     y_pred = best_pipe.predict(X_test)
     y_prob = best_pipe.predict_proba(X_test)[:, 1]
