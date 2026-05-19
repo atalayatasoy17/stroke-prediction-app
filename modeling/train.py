@@ -221,6 +221,21 @@ def evaluate_and_train():
         json.dump(results, f, indent=2, default=convert)
     print("Sonuclar kaydedildi: modeling/artifacts/results.json")
 
+    print("\n--- Feature Importance (RandomForest) ---")
+    rf_model = best_pipe.named_steps["model"]
+    if hasattr(rf_model, "estimator_"):
+        rf_estimator = rf_model.estimator_
+    else:
+        rf_estimator = rf_model
+
+    feature_names = best_pipe.named_steps["preprocessor"].named_steps["column_tf"].get_feature_names_out()
+    importances = rf_estimator.feature_importances_
+    feat_imp = pd.Series(importances, index=feature_names).sort_values(ascending=False)
+    print(feat_imp.head(10))
+
+    feat_imp.head(10).to_json("modeling/artifacts/feature_importance.json")
+    print("Feature importance kaydedildi.")
+
     return results, best_name
 
 
