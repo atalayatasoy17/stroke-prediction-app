@@ -855,3 +855,175 @@ for this patient group.
 - Class-weighted training (class_weight='balanced')
     """)
 
+
+elif page == "Risk Predictor":
+    st.header("Stroke Risk Predictor")
+    st.markdown("""
+    Enter patient information below to estimate stroke risk using our Random Forest model.
+    This tool is for educational purposes only and should not replace clinical judgment.
+    """)
+
+    st.markdown("---")
+
+    # ── Patient Input Form ────────────────────────────────────────────────────
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Patient Information")
+        age = st.slider("Age", min_value=0, max_value=100, value=55, step=1)
+        gender = st.selectbox("Gender", options=["Male", "Female"])
+        ever_married = st.selectbox("Ever Married", options=["Yes", "No"])
+        work_type = st.selectbox("Work Type",
+                                 options=["Private", "Self-employed", "Govt_job", "children", "Never_worked"])
+        residence_type = st.selectbox("Residence Type", options=["Urban", "Rural"])
+
+    with col2:
+        st.subheader("Medical Information")
+        hypertension = st.selectbox("Hypertension", options=["No", "Yes"])
+        heart_disease = st.selectbox("Heart Disease", options=["No", "Yes"])
+        avg_glucose_level = st.slider("Average Glucose Level (mg/dL)",
+                                       min_value=50.0, max_value=300.0, value=100.0, step=1.0)
+        bmi_input = st.slider("BMI", min_value=10.0, max_value=100.0, value=28.0, step=0.5)
+        smoking_status = st.selectbox("Smoking Status",
+                                      options=["never smoked", "formerly smoked", "smokes", "Unknown"])
+
+    st.markdown("---")
+
+    # ── Threshold Selection ───────────────────────────────────────────────────
+    st.subheader("Decision Threshold")
+    threshold_pred = st.slider(
+        "Risk Threshold",
+        min_value=0.05, max_value=0.50, value=0.131, step=0.005,
+        help="Default is 0.131 (optimized by TunedThresholdClassifierCV). Lower = more sensitive, Higher = more specific."
+    )
+
+    # ── Prediction ────────────────────────────────────────────────────────────
+    if st.button("Predict Stroke Risk", type="primary", use_container_width=True):
+        from modeling.preprocess import clean_data
+
+        input_data = pd.DataFrame({
+            "id": [0],
+            "gender": [gender],
+            "age": [float(age)],
+            "hypertension": [1 if hypertension == "Yes" else 0],
+            "heart_disease": [1 if heart_disease == "Yes" else 0],
+            "ever_married": [ever_married],
+            "work_type": [work_type],
+            "Residence_type": [residence_type],
+            "avg_glucose_level": [float(avg_glucose_level)],
+            "bmi": [float(bmi_input)],
+            "smoking_status": [smoking_status],
+            "stroke": [0]
+        })
+
+        input_clean = clean_data(input_data)
+        input_features = input_clean.drop(columns=[TARGET])
+
+        risk_prob = model.predict_proba(input_features)[:, 1][0]
+        prediction = 1 if risk_prob >= threshold_pred else 0
+
+        st.markdown("---")
+        st.subheader("Prediction Result")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            fig = px.pie(
+                values=[risk_prob, 1 - risk_prob],
+                names=["Stroke Risk", "No Stroke Risk"],
+                title=f"Stroke Risk: {risk_prob*100:.1f}%",
+                color_discrete_sequence=["#E74C3C", "#2ECC71"],
+                hole=0.6
+            )
+            fig.update_traces(textposition="outside", textinfo="percent+label")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.metric("Risk Probability", f"{risk_prob*100:.1f}%")
+            st.metric("Decision Threshold", f"{threshold_pred*100:.1f}%")
+
+            if risk_prob >= 0.20:
+                st.error(f"**High Risk** — Prediction: {'Stroke' if prediction == 1 else 'No Stroke'}")
+                st.markdown("This profile shows significant stroke risk indicators. Clinical evaluation strongly recommended.")
+            elif risk_prob >= 0.10:
+                st.warning(f"**Medium Risk** — Prediction: {'Stroke' if prediction == 1 else 'No Stroke'}")
+                st.markdown("This profile shows moderate stroke risk indicators. Regular monitoring advised.")
+            else:
+                st.success(f"**Low Risk** — Prediction: {'Stroke' if prediction == 1 else 'No Stroke'}")
+                st.markdown("This profile shows low stroke risk indicators based on the model.")
+
+        # ── Risk Factors Breakdown ────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("Risk Factor Analysis")
+
+        risk_factors = []
+        if age >= 60:
+            risk_factors.append(("Age", f"{age} years (Senior group)", "Increases risk"))
+        elif age >= 40:
+            risk_factors.append(("Age", f"{age} years (Middle-aged)", "Moderate risk"))
+        else:
+            risk_factors.append(("Age", f"{age} years (Young)", "Low risk"))
+
+        if avg_glucose_level >= 125:
+            risk_factors.append(("Glucose", f"{avg_glucose_level} mg/dL (Diabetic range)", "Increases risk"))
+        elif avg_glucose_level >= 100:
+            risk_factors.append(("Glucose", f"{avg_glucose_level} mg/dL (Pre-diabetic)", "Slight elevation"))
+        else:
+            risk_factors.append(("Glucose", f"{avg_glucose_level} mg/dL (Normal)", "Low risk"))
+
+        if hypertension == "Yes":
+            risk_factors.append(("Hypertension", "Present", "Increases risk 3x"))
+        if heart_disease == "Yes":
+            risk_factors.append(("Heart Disease", "Present", "Increases risk 4x"))
+        if hypertension == "Yes" and heart_disease == "Yes":
+            risk_factors.append(("Both Conditions", "Hypertension + Heart Disease", "Compounding effect (20.3%)"))
+
+        if bmi_input >= 30:
+            risk_factors.append(("BMI", f"{bmi_input} (Obese)", "Risk factor"))
+        elif bmi_input >= 25:
+            risk_factors.append(("BMI", f"{bmi_input} (Overweight)", "Mild risk"))
+        else:
+            risk_factors.append(("BMI", f"{bmi_input} (Normal)", "Low risk"))
+
+        if smoking_status == "smokes":
+            risk_factors.append(("Smoking", "Current smoker", "Increases risk"))
+        elif smoking_status == "formerly smoked":
+            risk_factors.append(("Smoking", "Former smoker", "Historical risk factor"))
+
+        risk_df = pd.DataFrame(risk_factors, columns=["Factor", "Value", "Effect"])
+        st.dataframe(risk_df, use_container_width=True, hide_index=True)
+
+        # ── Clinical Safety Note ──────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("Model Performance Context")
+
+        is_blind_spot = (40 <= age <= 65) and (avg_glucose_level < 125)
+
+        if is_blind_spot:
+            st.warning("""
+            **Clinical Note from Error Analysis:**
+            
+            This patient profile (age 40-65 with normal/pre-diabetic glucose) falls within the model's 
+            identified blind spot. Our error analysis showed that missed stroke cases had an average age 
+            of 58.2 years and average glucose of 100.1 mg/dL — very similar to this patient.
+            
+            The model may underestimate risk for this profile. Clinical evaluation should not rely 
+            solely on this prediction.
+            """)
+        else:
+            st.info("""
+            **Model Performance Note:**
+            
+            Based on our error analysis, the model performs most reliably for patients with clear 
+            risk indicators (older age, elevated glucose, or known comorbidities). This patient 
+            profile fits within the model's reliable prediction range.
+            """)
+
+        # ── Disclaimer ────────────────────────────────────────────────────────
+        st.markdown("---")
+        st.caption("""
+        **Disclaimer:** This tool is built for an academic data science project (DS 570).
+        It is not a medical device and should not be used for clinical decision-making.
+        Always consult qualified healthcare professionals for medical advice.
+        Model performance: ROC-AUC 0.821, Recall 0.54 at optimal threshold.
+        """)
