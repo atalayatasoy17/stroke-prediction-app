@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 .kaggle/
 modeling/artifacts/
+.ipynb_checkpoints/
+.pytest_cache/
